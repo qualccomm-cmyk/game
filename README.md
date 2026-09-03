@@ -2,8 +2,8 @@
 <html lang="id">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-  <title>2D Shadow Purple Platformer</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>2D Purple Shadow Platformer</title>
   <style>
     * {
       box-sizing: border-box;
@@ -11,11 +11,12 @@
       padding: 0;
       user-select: none;
       -webkit-user-select: none;
+      touch-action: none;
     }
     body {
-      background-color: #0b0512;
+      background-color: #08030f;
       color: #fff;
-      font-family: Arial, sans-serif;
+      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
       display: flex;
       flex-direction: column;
       align-items: center;
@@ -26,70 +27,83 @@
     #game-container {
       position: relative;
       width: 100vw;
-      max-width: 900px;
-      height: 506px; /* Aspect Ratio 16:9 */
-      background: #180a29;
-      border: 3px solid #7b2cbf;
-      box-shadow: 0 0 20px rgba(123, 44, 191, 0.6);
+      max-width: 960px;
+      height: 540px;
+      background: #12061c;
+      border: 3px solid #7209b7;
+      box-shadow: 0 0 30px rgba(114, 9, 183, 0.7);
       overflow: hidden;
+      border-radius: 8px;
     }
     canvas {
       display: block;
       width: 100%;
       height: 100%;
     }
-    /* Mobile Controls Overlay */
+    
+    /* FIX: PERBAIKAN TOMBOL KONTROL HP (LEBIH BESAR & MUDAH DITEKAN) */
     #touch-controls {
       position: absolute;
-      bottom: 10px;
+      bottom: 15px;
       left: 0;
       width: 100%;
       display: flex;
       justify-content: space-between;
-      padding: 0 15px;
+      padding: 0 20px;
       pointer-events: none;
+      z-index: 10;
     }
     .btn-group {
       display: flex;
-      gap: 10px;
+      gap: 12px;
       pointer-events: auto;
     }
     .btn {
-      width: 55px;
-      height: 55px;
-      background: rgba(123, 44, 191, 0.4);
-      border: 2px solid #b5179e;
+      width: 75px;
+      height: 75px;
+      background: rgba(35, 8, 60, 0.85);
+      border: 3px solid #b5179e;
       border-radius: 50%;
-      color: white;
-      font-weight: bold;
+      color: #ffffff;
+      font-weight: 900;
       font-size: 16px;
       display: flex;
       align-items: center;
       justify-content: center;
-      touch-action: manipulation;
+      box-shadow: 0 0 15px rgba(181, 23, 158, 0.6), inset 0 0 10px rgba(247, 37, 133, 0.4);
+      backdrop-filter: blur(5px);
+      text-shadow: 0 0 8px #f72585;
+      transition: transform 0.05s ease;
     }
-    .btn:active {
-      background: rgba(181, 23, 158, 0.8);
-      transform: scale(0.95);
+    .btn:active, .btn.pressed {
+      background: rgba(247, 37, 133, 0.9);
+      border-color: #4cc9f0;
+      transform: scale(0.90);
+      box-shadow: 0 0 25px rgba(247, 37, 133, 1);
     }
     .btn-action {
-      background: rgba(247, 37, 133, 0.4);
+      background: rgba(114, 9, 183, 0.85);
       border-color: #f72585;
+    }
+    .btn-dash {
+      background: rgba(76, 201, 240, 0.3);
+      border-color: #4cc9f0;
     }
   </style>
 </head>
 <body>
 
 <div id="game-container">
-  <canvas id="gameCanvas" width="900" height="506"></canvas>
+  <canvas id="gameCanvas" width="960" height="540"></canvas>
   
+  <!-- Controller Layar Sentuh HP -->
   <div id="touch-controls">
     <div class="btn-group">
       <div class="btn" id="btn-left">◄</div>
       <div class="btn" id="btn-right">►</div>
     </div>
     <div class="btn-group">
-      <div class="btn btn-action" id="btn-dash">DASH</div>
+      <div class="btn btn-dash" id="btn-dash">DASH</div>
       <div class="btn btn-action" id="btn-attack">ATK</div>
       <div class="btn btn-action" id="btn-jump">JUMP</div>
     </div>
@@ -100,7 +114,7 @@
 const canvas = document.getElementById('gameCanvas');
 const ctx = canvas.getContext('2d');
 
-// Load Assets
+// Memuat Gambar Asset
 const assets = {
   heroine: new Image(),
   monsters: new Image(),
@@ -113,62 +127,133 @@ assets.monsters.src = 'monsters.png';
 assets.towers.src = 'towers.png';
 assets.platforms.src = 'platforms.png';
 
-// Inputs Status
-const keys = { left: false, right: false, jump: false, attack: false, dash: false };
+// Status Tombol
+const keys = { left: false, right: false, jump: false };
 
-// Player Configuration
+// Kelas Animasi Sprite Sheet (Memotong Frame Gambar)
+class SpriteAnimator {
+  constructor(image, cols, rows) {
+    this.image = image;
+    this.cols = cols;
+    this.rows = rows;
+    this.frameIndex = 0;
+    this.tickCount = 0;
+  }
+
+  drawFrame(ctx, anim, x, y, width, height, facingLeft) {
+    if (!this.image.complete || this.image.naturalWidth === 0) {
+      // Fallback jika gambar belum termuat
+      ctx.fillStyle = '#b5179e';
+      ctx.fillRect(x, y, width, height);
+      return;
+    }
+
+    const frameW = this.image.naturalWidth / this.cols;
+    const frameH = this.image.naturalHeight / this.rows;
+
+    // Hitung Frame Animasi
+    this.tickCount++;
+    if (this.tickCount >= anim.speed) {
+      this.tickCount = 0;
+      if (this.frameIndex < anim.start || this.frameIndex > anim.end) {
+        this.frameIndex = anim.start;
+      } else {
+        if (this.frameIndex < anim.end) {
+          this.frameIndex++;
+        } else if (anim.loop !== false) {
+          this.frameIndex = anim.start;
+        }
+      }
+    }
+
+    let col = this.frameIndex % this.cols;
+    let row = anim.row;
+
+    let sx = col * frameW;
+    let sy = row * frameH;
+
+    ctx.save();
+    if (facingLeft) {
+      ctx.translate(x + width, y);
+      ctx.scale(-1, 1);
+      ctx.drawImage(this.image, sx, sy, frameW, frameH, 0, 0, width, height);
+    } else {
+      ctx.drawImage(this.image, sx, sy, frameW, frameH, x, y, width, height);
+    }
+    ctx.restore();
+  }
+}
+
+// Inisialisasi Animator
+const heroAnimator = new SpriteAnimator(assets.heroine, 10, 5);
+const monsterAnimator = new SpriteAnimator(assets.monsters, 10, 6);
+
+// Definisi Animasi Heroine
+const HERO_ANIMS = {
+  idle:   { row: 0, start: 0, end: 3, speed: 10 },
+  run:    { row: 0, start: 4, end: 9, speed: 5 },
+  dash:   { row: 1, start: 0, end: 3, speed: 3 },
+  attack: { row: 1, start: 4, end: 8, speed: 3 },
+  jump:   { row: 3, start: 0, end: 3, speed: 6 },
+  death:  { row: 4, start: 0, end: 6, speed: 10, loop: false }
+};
+
+// Definisi Animasi Musuh (Reaper Skeleton)
+const REAPER_ANIMS = {
+  walk:   { row: 0, start: 0, end: 7, speed: 8 },
+  attack: { row: 1, start: 0, end: 7, speed: 6 },
+  death:  { row: 2, start: 3, end: 6, speed: 10, loop: false }
+};
+
+// Objek Karakter Utama
 const player = {
   x: 100,
   y: 300,
-  width: 50,
-  height: 65,
+  width: 60,
+  height: 75,
   vx: 0,
   vy: 0,
-  speed: 4,
-  jumpPower: -11,
-  gravity: 0.5,
+  speed: 4.5,
+  jumpPower: -12,
+  gravity: 0.55,
   isGrounded: false,
   facing: 'right',
   hp: 100,
   maxHp: 100,
-  isAttacking: false,
+  state: 'idle', // idle, run, jump, dash, attack, dead
   attackTimer: 0,
-  isDashing: false,
   dashTimer: 0,
-  isDead: false,
-  deathTimer: 0,
-  animFrame: 0,
-  animTimer: 0
+  invulnerable: false
 };
 
-// Platforms Data
+// Pijakan/Platforms
 const platforms = [
-  { x: 0, y: 440, width: 900, height: 66 }, // Tanah Utama
-  { x: 180, y: 320, width: 160, height: 25 },
-  { x: 420, y: 240, width: 180, height: 25 },
-  { x: 680, y: 340, width: 160, height: 25 }
+  { x: 0, y: 460, width: 960, height: 80 }, // Tanah Utama
+  { x: 180, y: 340, width: 180, height: 30 },
+  { x: 440, y: 250, width: 200, height: 30 },
+  { x: 720, y: 350, width: 180, height: 30 }
 ];
 
-// Towers Data
+// Menara Tower
 const towers = [
-  { x: 720, y: 220, width: 70, height: 120, hp: 120, maxHp: 120, shootTimer: 0 }
+  { x: 760, y: 230, width: 80, height: 120, hp: 120, maxHp: 120, shootTimer: 0 }
 ];
 
-// Enemies Data
+// Musuh Monster Tengkorak
 const enemies = [
-  { x: 230, y: 270, width: 45, height: 50, hp: 50, maxHp: 50, vx: 1, minX: 180, maxX: 300, dir: 1, isDead: false },
-  { x: 500, y: 390, width: 45, height: 50, hp: 60, maxHp: 60, vx: 1.5, minX: 450, maxX: 650, dir: 1, isDead: false }
+  { x: 220, y: 280, width: 55, height: 60, hp: 60, maxHp: 60, vx: 1.2, minX: 180, maxX: 320, dir: 1, state: 'walk', isDead: false },
+  { x: 500, y: 400, width: 55, height: 60, hp: 80, maxHp: 80, vx: 1.5, minX: 450, maxX: 680, dir: 1, state: 'walk', isDead: false }
 ];
 
-// Projectiles Data
+// Proyektil Tembakan Tower
 const projectiles = [];
 
-// Event Listeners (Keyboard)
+// Input Keyboard
 window.addEventListener('keydown', (e) => {
-  if (player.isDead) return;
+  if (player.state === 'dead') return;
   if (e.key === 'ArrowLeft' || e.key === 'a') keys.left = true;
   if (e.key === 'ArrowRight' || e.key === 'd') keys.right = true;
-  if ((e.key === 'ArrowUp' || e.key === 'w' || e.key === ' ') && player.isGrounded) keys.jump = true;
+  if ((e.key === 'ArrowUp' || e.key === 'w' || e.key === ' ') && player.isGrounded) player.vy = player.jumpPower;
   if (e.key === 'j' || e.key === 'z') triggerAttack();
   if (e.key === 'k' || e.key === 'x') triggerDash();
 });
@@ -178,58 +263,76 @@ window.addEventListener('keyup', (e) => {
   if (e.key === 'ArrowRight' || e.key === 'd') keys.right = false;
 });
 
-// Mobile Controls Event Bindings
-function bindTouch(id, actionStart, actionEnd) {
+// Event Layar Sentuh HP
+function bindTouchButton(id, onStart, onEnd) {
   const btn = document.getElementById(id);
-  btn.addEventListener('touchstart', (e) => { e.preventDefault(); actionStart(); });
-  btn.addEventListener('touchend', (e) => { e.preventDefault(); if (actionEnd) actionEnd(); });
-  btn.addEventListener('mousedown', (e) => { actionStart(); });
-  btn.addEventListener('mouseup', (e) => { if (actionEnd) actionEnd(); });
+  
+  const handleStart = (e) => {
+    if (e.cancelable) e.preventDefault();
+    btn.classList.add('pressed');
+    onStart();
+  };
+  
+  const handleEnd = (e) => {
+    if (e.cancelable) e.preventDefault();
+    btn.classList.remove('pressed');
+    if (onEnd) onEnd();
+  };
+
+  btn.addEventListener('touchstart', handleStart, { passive: false });
+  btn.addEventListener('touchend', handleEnd, { passive: false });
+  btn.addEventListener('touchcancel', handleEnd, { passive: false });
+  btn.addEventListener('mousedown', handleStart);
+  btn.addEventListener('mouseup', handleEnd);
+  btn.addEventListener('mouseleave', handleEnd);
 }
 
-bindTouch('btn-left', () => keys.left = true, () => keys.left = false);
-bindTouch('btn-right', () => keys.right = true, () => keys.right = false);
-bindTouch('btn-jump', () => { if (player.isGrounded && !player.isDead) player.vy = player.jumpPower; });
-bindTouch('btn-attack', () => triggerAttack());
-bindTouch('btn-dash', () => triggerDash());
+bindTouchButton('btn-left', () => keys.left = true, () => keys.left = false);
+bindTouchButton('btn-right', () => keys.right = true, () => keys.right = false);
+bindTouchButton('btn-jump', () => { if (player.isGrounded && player.state !== 'dead') player.vy = player.jumpPower; });
+bindTouchButton('btn-attack', () => triggerAttack());
+bindTouchButton('btn-dash', () => triggerDash());
 
+// Aksi Serangan (Attack)
 function triggerAttack() {
-  if (!player.isAttacking && !player.isDead) {
-    player.isAttacking = true;
-    player.attackTimer = 15;
-    
-    // Hit Detection
-    const atkBox = {
-      x: player.facing === 'right' ? player.x + player.width : player.x - 60,
-      y: player.y,
-      width: 60,
-      height: player.height
-    };
+  if (player.state === 'dead' || player.state === 'attack') return;
+  player.state = 'attack';
+  player.attackTimer = 18;
+  
+  const hitWidth = 70;
+  const hitX = player.facing === 'right' ? player.x + player.width : player.x - hitWidth;
+  const attackBox = { x: hitX, y: player.y - 10, width: hitWidth, height: player.height + 20 };
 
-    // Damage Enemies
-    enemies.forEach(enemy => {
-      if (!enemy.isDead && checkCollision(atkBox, enemy)) {
-        enemy.hp -= 25;
-        if (enemy.hp <= 0) enemy.isDead = true;
+  // Serang Musuh
+  enemies.forEach(enemy => {
+    if (!enemy.isDead && checkCollision(attackBox, enemy)) {
+      enemy.hp -= 30;
+      if (enemy.hp <= 0) {
+        enemy.hp = 0;
+        enemy.isDead = true;
+        enemy.state = 'death';
       }
-    });
+    }
+  });
 
-    // Damage Towers
-    towers.forEach(tower => {
-      if (tower.hp > 0 && checkCollision(atkBox, tower)) {
-        tower.hp -= 20;
-      }
-    });
-  }
+  // Serang Tower
+  towers.forEach(tower => {
+    if (tower.hp > 0 && checkCollision(attackBox, tower)) {
+      tower.hp -= 25;
+      if (tower.hp < 0) tower.hp = 0;
+    }
+  });
 }
 
+// Aksi Dash
 function triggerDash() {
-  if (!player.isDashing && !player.isDead) {
-    player.isDashing = true;
-    player.dashTimer = 12;
-  }
+  if (player.state === 'dead' || player.state === 'dash') return;
+  player.state = 'dash';
+  player.dashTimer = 14;
+  player.invulnerable = true;
 }
 
+// Cek Tabrakan Bounding Box
 function checkCollision(r1, r2) {
   return !(r1.x > r2.x + r2.width ||
            r1.x + r1.width < r2.x ||
@@ -237,43 +340,69 @@ function checkCollision(r1, r2) {
            r1.y + r1.height < r2.y);
 }
 
-// Game Update Loop
+// Gambar Badge Darah (Health Badge Overhead)
+function drawHealthBadge(ctx, x, y, width, height, currentHp, maxHp) {
+  if (currentHp < 0) currentHp = 0;
+  const pct = currentHp / maxHp;
+
+  ctx.save();
+  ctx.fillStyle = 'rgba(10, 0, 20, 0.85)';
+  ctx.fillRect(x - 2, y - 2, width + 4, height + 4);
+  ctx.strokeStyle = '#b5179e';
+  ctx.lineWidth = 1.5;
+  ctx.strokeRect(x - 2, y - 2, width + 4, height + 4);
+
+  let barColor = pct > 0.5 ? '#7209b7' : (pct > 0.25 ? '#b5179e' : '#f72585');
+  ctx.fillStyle = barColor;
+  ctx.fillRect(x, y, width * pct, height);
+
+  ctx.fillStyle = '#4cc9f0';
+  ctx.fillRect(x, y, width * pct, 2);
+  ctx.restore();
+}
+
+// Update Fisika & Logika Game
 function update() {
-  if (player.isDead) {
-    player.deathTimer++;
-    return;
-  }
+  if (player.state === 'dead') return;
 
-  // Dash Mechanics
+  // Status Dash
   let currentSpeed = player.speed;
-  if (player.isDashing) {
-    currentSpeed = 12;
+  if (player.state === 'dash') {
+    currentSpeed = 11;
     player.dashTimer--;
-    if (player.dashTimer <= 0) player.isDashing = false;
+    if (player.dashTimer <= 0) {
+      player.state = 'idle';
+      player.invulnerable = false;
+    }
   }
 
-  // Movement Physics
+  // Status Serangan
+  if (player.state === 'attack') {
+    player.attackTimer--;
+    if (player.attackTimer <= 0) {
+      player.state = 'idle';
+    }
+  }
+
+  // Pergerakan Karakter
   if (keys.left) {
     player.vx = -currentSpeed;
     player.facing = 'left';
+    if (player.state !== 'dash' && player.state !== 'attack' && player.isGrounded) player.state = 'run';
   } else if (keys.right) {
     player.vx = currentSpeed;
     player.facing = 'right';
+    if (player.state !== 'dash' && player.state !== 'attack' && player.isGrounded) player.state = 'run';
   } else {
     player.vx = 0;
-  }
-
-  if (keys.jump && player.isGrounded) {
-    player.vy = player.jumpPower;
-    player.isGrounded = false;
-    keys.jump = false;
+    if (player.state !== 'dash' && player.state !== 'attack' && player.isGrounded) player.state = 'idle';
   }
 
   player.vy += player.gravity;
   player.x += player.vx;
   player.y += player.vy;
 
-  // Platform Collision
+  // Cek Pijakan Tanah
   player.isGrounded = false;
   platforms.forEach(plat => {
     if (player.x < plat.x + plat.width &&
@@ -287,17 +416,15 @@ function update() {
     }
   });
 
-  // Keep inside Canvas Bounds
+  if (!player.isGrounded && player.state !== 'dash' && player.state !== 'attack') {
+    player.state = 'jump';
+  }
+
+  // Batas Layar
   if (player.x < 0) player.x = 0;
   if (player.x + player.width > canvas.width) player.x = canvas.width - player.width;
 
-  // Attack Timer
-  if (player.isAttacking) {
-    player.attackTimer--;
-    if (player.attackTimer <= 0) player.isAttacking = false;
-  }
-
-  // Enemy Mechanics
+  // Logika Musuh
   enemies.forEach(enemy => {
     if (enemy.isDead) return;
     enemy.x += enemy.vx * enemy.dir;
@@ -305,158 +432,131 @@ function update() {
       enemy.dir *= -1;
     }
 
-    // Touch Enemy Damage
-    if (checkCollision(player, enemy) && !player.isDashing) {
-      player.hp -= 0.5;
+    // Tabrakan Musuh dengan Karakter
+    if (checkCollision(player, enemy) && !player.invulnerable) {
+      player.hp -= 0.6;
     }
   });
 
-  // Tower Shooting Mechanics
+  // Logika Tembakan Menara
   towers.forEach(tower => {
     if (tower.hp <= 0) return;
     tower.shootTimer++;
-    if (tower.shootTimer > 120) { // Shot every 2 seconds
+    if (tower.shootTimer > 110) {
       projectiles.push({
         x: tower.x,
-        y: tower.y + 40,
-        vx: -4,
+        y: tower.y + 35,
+        vx: -4.5,
         vy: 0,
-        radius: 8
+        radius: 9
       });
       tower.shootTimer = 0;
     }
   });
 
-  // Projectiles Update
+  // Update Proyektil Tembakan
   for (let i = projectiles.length - 1; i >= 0; i--) {
     let p = projectiles[i];
     p.x += p.vx;
 
-    // Hit Player
     const pBox = { x: p.x - p.radius, y: p.y - p.radius, width: p.radius*2, height: p.radius*2 };
-    if (checkCollision(player, pBox)) {
-      player.hp -= 15;
+    if (checkCollision(player, pBox) && !player.invulnerable) {
+      player.hp -= 18;
       projectiles.splice(i, 1);
       continue;
     }
 
-    // Remove Out of Bounds
     if (p.x < 0) projectiles.splice(i, 1);
   }
 
-  // Check Death
+  // Cek Kematian Karakter
   if (player.hp <= 0) {
     player.hp = 0;
-    player.isDead = true;
+    player.state = 'dead';
   }
 }
 
-// Render Health Bar Helper
-function drawHealthBar(x, y, width, height, currentHp, maxHp) {
-  if (currentHp < 0) currentHp = 0;
-  ctx.fillStyle = 'rgba(0, 0, 0, 0.6)';
-  ctx.fillRect(x, y, width, height);
-  ctx.fillStyle = currentHp > (maxHp * 0.3) ? '#7209b7' : '#f72585';
-  ctx.fillRect(x, y, (currentHp / maxHp) * width, height);
-  ctx.strokeStyle = '#fff';
-  ctx.lineWidth = 1;
-  ctx.strokeRect(x, y, width, height);
-}
-
-// Draw Function
+// Render Tampilan Game
 function draw() {
   ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-  // Background Grid/Vibe
-  ctx.fillStyle = '#120720';
+  // Latar Belakang
+  ctx.fillStyle = '#0f051a';
   ctx.fillRect(0, 0, canvas.width, canvas.height);
 
-  // Platforms Rendering
+  // Render Pijakan
   platforms.forEach(plat => {
     if (assets.platforms.complete && assets.platforms.naturalWidth !== 0) {
-      ctx.drawImage(assets.platforms, 10, 10, 300, 150, plat.x, plat.y, plat.width, plat.height);
+      ctx.drawImage(assets.platforms, 0, 0, 300, 150, plat.x, plat.y, plat.width, plat.height);
     } else {
       ctx.fillStyle = '#3a0ca3';
       ctx.fillRect(plat.x, plat.y, plat.width, plat.height);
     }
   });
 
-  // Towers Rendering
+  // Render Menara Tower
   towers.forEach(tower => {
     if (tower.hp > 0) {
       if (assets.towers.complete && assets.towers.naturalWidth !== 0) {
-        ctx.drawImage(assets.towers, 0, 0, 250, 300, tower.x, tower.y, tower.width, tower.height);
+        ctx.drawImage(assets.towers, 0, 0, 300, 300, tower.x, tower.y, tower.width, tower.height);
       } else {
         ctx.fillStyle = '#480ca8';
         ctx.fillRect(tower.x, tower.y, tower.width, tower.height);
       }
-      drawHealthBar(tower.x, tower.y - 12, tower.width, 6, tower.hp, tower.maxHp);
+      drawHealthBadge(ctx, tower.x, tower.y - 14, tower.width, 7, tower.hp, tower.maxHp);
     }
   });
 
-  // Enemies Rendering
+  // Render Musuh (Reaper)
   enemies.forEach(enemy => {
     if (!enemy.isDead) {
-      if (assets.monsters.complete && assets.monsters.naturalWidth !== 0) {
-        ctx.drawImage(assets.monsters, 0, 0, 120, 120, enemy.x, enemy.y, enemy.width, enemy.height);
-      } else {
-        ctx.fillStyle = '#b5179e';
-        ctx.fillRect(enemy.x, enemy.y, enemy.width, enemy.height);
-      }
-      drawHealthBar(enemy.x, enemy.y - 10, enemy.width, 5, enemy.hp, enemy.maxHp);
+      monsterAnimator.drawFrame(
+        ctx,
+        REAPER_ANIMS[enemy.state] || REAPER_ANIMS.walk,
+        enemy.x,
+        enemy.y,
+        enemy.width,
+        enemy.height,
+        enemy.dir === -1
+      );
+      drawHealthBadge(ctx, enemy.x, enemy.y - 12, enemy.width, 6, enemy.hp, enemy.maxHp);
     }
   });
 
-  // Projectiles Rendering
+  // Render Proyektil Tembakan
   projectiles.forEach(p => {
     ctx.fillStyle = '#f72585';
     ctx.beginPath();
     ctx.arc(p.x, p.y, p.radius, 0, Math.PI * 2);
     ctx.fill();
-    ctx.shadowBlur = 10;
+    ctx.shadowBlur = 12;
     ctx.shadowColor = '#f72585';
   });
   ctx.shadowBlur = 0;
 
-  // Player Rendering
-  if (!player.isDead) {
-    if (assets.heroine.complete && assets.heroine.naturalWidth !== 0) {
-      // Dynamic Sprite Crop Logic
-      let sx = 0, sy = 0;
-      if (player.isAttacking) { sx = 200; sy = 200; }
-      else if (player.isDashing) { sx = 400; sy = 100; }
-      
-      ctx.save();
-      if (player.facing === 'left') {
-        ctx.translate(player.x + player.width, player.y);
-        ctx.scale(-1, 1);
-        ctx.drawImage(assets.heroine, sx, sy, 120, 120, 0, 0, player.width, player.height);
-      } else {
-        ctx.drawImage(assets.heroine, sx, sy, 120, 120, player.x, player.y, player.width, player.height);
-      }
-      ctx.restore();
-    } else {
-      ctx.fillStyle = player.isDashing ? '#4cc9f0' : '#4895ef';
-      ctx.fillRect(player.x, player.y, player.width, player.height);
-    }
+  // Render Karakter Utama
+  const currentAnim = HERO_ANIMS[player.state] || HERO_ANIMS.idle;
+  heroAnimator.drawFrame(
+    ctx,
+    currentAnim,
+    player.x,
+    player.y,
+    player.width,
+    player.height,
+    player.facing === 'left'
+  );
 
-    // Visual Effect for Attack
-    if (player.isAttacking) {
-      ctx.fillStyle = 'rgba(247, 37, 133, 0.5)';
-      let atkX = player.facing === 'right' ? player.x + player.width : player.x - 40;
-      ctx.fillRect(atkX, player.y, 40, player.height);
-    }
-
-    // Health Bar di Atas Kepala Karakter
-    drawHealthBar(player.x - 5, player.y - 15, player.width + 10, 7, player.hp, player.maxHp);
+  // Badge Darah Di Atas Kepala Karakter Utama
+  if (player.state !== 'dead') {
+    drawHealthBadge(ctx, player.x - 5, player.y - 16, player.width + 10, 8, player.hp, player.maxHp);
   } else {
-    // Death Animation & Text
     ctx.fillStyle = '#f72585';
-    ctx.font = 'bold 36px Arial';
+    ctx.font = '900 40px sans-serif';
     ctx.textAlign = 'center';
-    ctx.fillText('GAME OVER', canvas.width / 2, canvas.height / 2);
-    ctx.font = '16px Arial';
-    ctx.fillText('Refresh/Muat Ulang Halaman untuk Main Lagi', canvas.width / 2, canvas.height / 2 + 40);
+    ctx.fillText('GAME OVER', canvas.width / 2, canvas.height / 2 - 10);
+    ctx.font = '16px sans-serif';
+    ctx.fillStyle = '#fff';
+    ctx.fillText('Muat ulang / Refresh halaman untuk restart', canvas.width / 2, canvas.height / 2 + 30);
   }
 }
 
@@ -467,7 +567,6 @@ function gameLoop() {
   requestAnimationFrame(gameLoop);
 }
 
-// Jalankan Game saat Siap
 gameLoop();
 </script>
 </body>
